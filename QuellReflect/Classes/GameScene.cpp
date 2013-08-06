@@ -1,0 +1,975 @@
+#include "SeedPK.h"
+#include "GameScene.h"
+#include "SimpleAudioEngine.h"
+#include "BoxMenu.h"
+#include "Score.h"
+#include "CharTran.h"
+
+#include "Player.h"
+#include "Player317.h"
+#include "PlayerBird.h"
+#include "Playerfngng.h"
+#include "PlayerLJX.h"
+#include "PlayerOOO.h"
+#include "PlayerPig.h"
+#include "PlayerXXX.h"
+
+#include <iostream>
+#include <fstream>
+#include <process.h>
+
+#define MaxMoveCount 200
+
+using namespace std;
+using namespace cocos2d;
+using namespace CocosDenshion;
+
+/* 选手的答案 */
+std::list<MoveDirection> m_answerList;
+
+/* 当前地图矩阵 */
+CellState m_quellReflectMap[MaxMapRow][MaxMapColumn];
+
+/* 当前地图行数 */
+int m_currentMapRow;
+
+/* 当前地图列数 */
+int m_currentMapColumn;
+
+/* Player类数组 */
+Player* m_playerArr[7];
+
+unsigned __stdcall solutionThread(void* pArguments)
+{
+	Score *pCurScore = Score::GetInstance();
+	try
+	{
+		m_answerList = m_playerArr[pCurScore->teamTag /1000 -1]->solutionToMap(m_quellReflectMap, m_currentMapRow, m_currentMapColumn);
+	}
+	catch (...){}
+
+	_endthreadex(0);
+
+	return 0;
+} 
+
+GameScene::GameScene()
+{
+	m_playerArr[TeamLJX / 1000 -1] = new PlayerLJX();
+	m_playerArr[TeamXXX / 1000 -1] = new PlayerXXX();
+	m_playerArr[TeamBird / 1000 -1] = new PlayerBird();
+	m_playerArr[TeamOOO / 1000 -1] = new PlayerOOO();
+	m_playerArr[TeamThree / 1000 -1] = new Player317();
+	m_playerArr[TeamPig / 1000 -1] = new PlayerPig();
+	m_playerArr[TeamFngng / 1000 -1] = new Playerfngng();
+}
+
+/* 析构函数释放动画的内存 */
+GameScene::~GameScene()
+{
+}
+
+/* 这里自己做了一个create函数 */
+CCScene* GameScene::sceneWithStage(int stage)
+{
+    CCScene *scene = CCScene::create();
+
+    GameScene *layer = new GameScene(); 
+    layer->initWithStage(stage);
+    if (layer && layer->init()) 
+    { 
+        layer->autorelease(); 
+    } 
+    else 
+    { 
+        CC_SAFE_DELETE(layer); 
+        layer = NULL; 
+        return NULL; 
+    } 
+    scene->addChild(layer);
+
+    return scene;
+}
+
+void GameScene::initWithStage(int stage)
+{
+    GameScene::_stage = stage;
+    
+    return;
+}
+
+/* 主要的画面初始化 */
+bool GameScene::init()
+{
+    const int BufSize = 256;
+	/* 加载逻辑地图文件 */
+	char mapFileName[BufSize];
+	sprintf(mapFileName, "../Resources/level_0%d.txt", GameScene::_stage);
+	initQuellReflectMap(mapFileName);
+
+	/* 这里是通过地图的名字来打开地图 */
+	char mapName[BufSize];
+	sprintf(mapName, "../Resources/level_0%d.tmx", GameScene::_stage);
+    _tileMap = CCTMXTiledMap::create(mapName);
+	if(NULL == _tileMap) {return false;}
+
+	/* 加载地图 */
+	this->addChild(_tileMap);
+
+	/* 加载背景图片 */
+	CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+	CCSprite *headerSprite = CCSprite::create("../Resources/header.png");
+	headerSprite->setPosition(CCPointMake(winSize.width/2, winSize.height-32));
+	CCSprite *backgroudSprite = CCSprite::create("../Resources/loading2.png");
+	backgroudSprite->setPosition(CCPointMake(winSize.width/2, winSize.height/2));
+	addChild(backgroudSprite, -2);
+	addChild(headerSprite, -2);
+
+	/* 获取水滴的初始坐标 */
+	CCTMXObjectGroup *objects = _tileMap->objectGroupNamed("object");
+	CCDictionary *objPoint = objects->objectNamed("CellRainDrop0");
+	int x, y;
+	x = objPoint->valueForKey("x")->intValue();
+	y = objPoint->valueForKey("y")->intValue();
+
+	/* 通过图片来加载水滴 */
+	whitePearlFrame = CCSpriteFrame::create(GameAtlasFile, CCRectMake(0, 0, TileWidth, TileHeight));
+	heroSprite = CCSprite::createWithSpriteFrame(whitePearlFrame);
+	heroSprite->setPosition(CCPointMake(x + TileWidth / 2, y + TileHeight / 2));
+	this->addChild(heroSprite);
+
+	/* 获取水珠的初始坐标 */
+	/* 这里一开始是使用的array来进行保存，如果后期用不到这个array记得删掉 */
+	for (int i = 0; i < m_existedPearls; i++)
+	{
+		char pearlStr[20];
+		sprintf(pearlStr, "CellNormalPearl%d", i);
+		CCDictionary *objPoint = objects->objectNamed(pearlStr);
+
+		if (NULL == objPoint)
+        {
+            break;
+        }
+
+		x = objPoint->valueForKey("x")->intValue();
+		y = objPoint->valueForKey("y")->intValue();
+		CCSprite *pearlSprite = CCSprite::create(GameAtlasFile, CCRectMake(TileWidth * 0, TileHeight * 4, TileWidth, TileHeight));
+		pearlSprite->setPosition(CCPointMake(x + TileWidth / 2, y + TileHeight / 2));
+		pearlSprite->setTag(x * m_currentMapRow / TileWidth + (m_currentMapRow - y / TileHeight - 1));
+		this->addChild(pearlSprite);
+	}
+
+	/* 添加黄色水珠的显示 */
+	for(int j = 0; j < 15; j++)
+	{
+		char pearlStr[20];
+		sprintf(pearlStr, "CellYellowPearl%d", j);
+		CCDictionary *objPoint = objects->objectNamed(pearlStr);
+
+		if (NULL == objPoint)
+        {
+            break;
+        }
+
+		x = objPoint->valueForKey("x")->intValue();
+		y = objPoint->valueForKey("y")->intValue();
+		CCSpriteFrame *yellowPearlFrame = CCSpriteFrame::create(GameAtlasFile, CCRectMake(TileWidth * 1, TileHeight * 4, TileWidth, TileHeight));
+		CCSprite *yellowPearlSprite = CCSprite::createWithSpriteFrame(yellowPearlFrame);
+		yellowPearlSprite->setPosition(CCPointMake(x + TileWidth / 2, y + TileHeight / 2));
+		yellowPearlSprite->setTag(x * m_currentMapRow / TileWidth + (m_currentMapRow - y / TileHeight - 1));
+		this->addChild(yellowPearlSprite);
+	}
+
+	/* 添加黄色墙的显示 */
+	for(int k = 0; k < 15; k++)
+	{
+		char pearlStr[20];
+		sprintf(pearlStr, "CellYellowWall%d", k);
+		CCDictionary *objPointDic = objects->objectNamed(pearlStr);
+
+		if (NULL == objPointDic){break;}
+		x = objPointDic->valueForKey("x")->intValue();
+		y = objPointDic->valueForKey("y")->intValue();
+		CCSprite *yellowWallSprite = CCSprite::create(GameAtlasFile, CCRectMake(TileWidth * 3, TileHeight * 4, TileWidth, TileHeight));
+		yellowWallSprite->setPosition(CCPointMake(x + TileWidth / 2, y + TileHeight / 2));
+		yellowWallSprite->setTag(x * m_currentMapRow / TileWidth + (m_currentMapRow - y / TileHeight - 1));
+		this->addChild(yellowWallSprite);
+	}
+
+	/* 添加opengate的显示 */
+	iTagForOpenGate = 0;
+	for (int m = 0; m < 5; m++)
+	{
+		char openGateStr[20];
+		sprintf(openGateStr, "CellOpenGate%d", m);
+		CCDictionary *openGatePointDic = objects->objectNamed(openGateStr);
+		if (NULL == openGatePointDic){break;}
+		x = openGatePointDic->valueForKey("x")->intValue();
+		y = openGatePointDic->valueForKey("y")->intValue();
+		CCSprite *openGateSprite = CCSprite::create(GameAtlasFile, CCRectMake(TileWidth * 9, TileHeight*0, TileWidth, TileHeight));
+		openGateSprite->setPosition(CCPointMake(x + TileWidth / 2, y+TileHeight / 2));
+		iTagForOpenGate = x * m_currentMapRow / TileWidth + (m_currentMapRow - y / TileHeight - 1);
+		openGateSprite->setTag(iTagForOpenGate);
+		this->addChild(openGateSprite);
+	}
+
+	/* 这里添加最优步数、当前步数、Titile等信息的显示 */
+	Score *scoreInstance = Score::GetInstance();
+	TEAM_S *pstTeamScore = scoreInstance->teamScore;
+	int teamTag = scoreInstance->teamTag;
+	char bestStepArr[20], curStepArr[20], curScoreArr[20];
+	sprintf(bestStepArr, "(%d)", m_bestMoveCount);
+	sprintf(curStepArr, "%d", m_userMoveCount);
+	sprintf(curScoreArr, "%d", pstTeamScore[teamTag/1000 - 1].iScore);
+
+	string gameTitle = GameTitleString;
+	GBKToUTF8(gameTitle,"gbk","utf-8");
+
+	CCLabelTTF *titleLabel = CCLabelTTF::create(gameTitle.c_str(), "微软雅黑", 30);
+	titleLabel->setColor(ccc3(0xc3, 0xa8, 0x91));
+	CCLabelTTF *bestStepLabel = CCLabelTTF::create(bestStepArr, "Calibri", 20);
+	curStepLabel = CCLabelTTF::create(curStepArr, "Calibri", 20);
+	curScoreLabel = CCLabelTTF::create(curScoreArr, "Calibri", 20);
+	curScoreLabel->setColor(ccRED);
+	curScoreLabel->setFontSize(25);
+
+	titleLabel->setPosition(CCPointMake(winSize.width / 2, winSize.height - 30));
+	bestStepLabel->setPosition(CCPointMake(50, winSize.height - 45));
+	curStepLabel->setPosition(CCPointMake(20, winSize.height - 45));
+	curScoreLabel->setPosition(CCPointMake(35, winSize.height - 18));
+
+	addChild(titleLabel);
+	addChild(bestStepLabel);
+	addChild(curStepLabel);
+	addChild(curScoreLabel);
+
+	/* 这里是上下左右按键的初始化 */
+	CCMenuItem *downMenuItem = CCMenuItemImage::create(ArrowUpUnselectedFile, ArrowUpSelectedFile, this, menu_selector(GameScene::menuCallBackMove));
+	CCMenuItem *upMenuItem = CCMenuItemImage::create(ArrowUpUnselectedFile, ArrowUpSelectedFile, this, menu_selector(GameScene::menuCallBackMove));
+	CCMenuItem *leftMenuItem = CCMenuItemImage::create(ArrowUpUnselectedFile, ArrowUpSelectedFile, this, menu_selector(GameScene::menuCallBackMove));
+	CCMenuItem *rightMenuItem = CCMenuItemImage::create(ArrowUpUnselectedFile, ArrowUpSelectedFile, this, menu_selector(GameScene::menuCallBackMove));
+    /* 用于自动运行选手答案的按钮 */
+    CCMenuItem *loadMenuItem = CCMenuItemImage::create(LoadUnselectedFile, LoadSelectedFile, this, menu_selector(GameScene::loadAnswerToRun));
+	/* 用于重玩的按钮 */
+	CCMenuItem *replayMenuItem = CCMenuItemImage::create(replayUnselectedFile, replaySelectedFile, this, menu_selector(GameScene::replayCallBack));
+	/* 用于下一关的按钮 */
+	CCMenuItem *nextMenuItem = CCMenuItemImage::create(nextUnselectedFile, nextSelectedFile, this, menu_selector(GameScene::nextStage));
+
+	upMenuItem->setRotation(0);
+	rightMenuItem->setRotation(90);
+	leftMenuItem->setRotation(-90);
+	downMenuItem->setRotation(180);
+
+	loadMenuItem->setPosition(winSize.width - 105, winSize.height/2 + 20);
+	nextMenuItem->setPosition(winSize.width - 35, winSize.height/2 + 20);
+	downMenuItem->setPosition(winSize.width - 70, winSize.height/2 - 120);
+	upMenuItem->setPosition(winSize.width - 70, winSize.height/2 - 40);
+	leftMenuItem->setPosition(winSize.width - 110, winSize.height/2 - 80);
+	rightMenuItem->setPosition(winSize.width - 30, winSize.height/2 - 80);
+	replayMenuItem->setPosition(winSize.width -  30, winSize.height - 40);
+
+	downMenuItem->setTag(MoveDown * 100);
+    upMenuItem->setTag(MoveUp * 100);
+    leftMenuItem->setTag(MoveLeft * 100);
+    rightMenuItem->setTag(MoveRight * 100);
+
+	CCMenu *controllMenu = CCMenu::create(loadMenuItem, replayMenuItem, nextMenuItem, NULL);
+	arrowMenu = CCMenu::create(downMenuItem, upMenuItem, leftMenuItem, rightMenuItem, NULL);
+	controllMenu->setPosition(0,0);
+	arrowMenu->setPosition(0, 0);
+
+	addChild(controllMenu);
+	addChild(arrowMenu);
+
+    return true;
+}
+
+void GameScene::nextStage(cocos2d::CCObject *psender)
+{
+	if (_stage < MaxStageNumber)
+	{
+		CCScene *scene = GameScene::sceneWithStage(++_stage);
+		CCTransitionFade *tran = CCTransitionFade::create(1.0f, scene, ccBLACK);
+		CCDirector::sharedDirector()->replaceScene(tran);
+	}
+	else
+	{
+		CCScene *box = BoxMenu::scene();
+		CCTransitionFade *tran = CCTransitionFade::create(1.0f, box, ccBLACK);
+		CCDirector::sharedDirector()->replaceScene(tran);
+	}
+}
+
+void GameScene::replayCallBack(CCObject *pSender)
+{
+	CCDirector::sharedDirector()->replaceScene(GameScene::sceneWithStage(_stage));
+}
+
+/* 按键的回调函数，通过tag值来获取移动的方向 */
+void GameScene::menuCallBackMove(CCObject *pSender)
+{
+    CCNode *node = (CCNode *)pSender;
+    int targetDir = (node->getTag())/100;
+    CCPoint moveByPosition;
+    switch(targetDir)
+    {
+        case MoveDown:
+            moveRainDrop(0, MoveDown);
+            break;
+        case MoveLeft:
+            moveRainDrop(0, MoveLeft);
+            break;
+        case MoveRight:
+            moveRainDrop(0, MoveRight);
+            break;
+        case MoveUp:
+            moveRainDrop(0, MoveUp);
+            break;
+        default:
+            break;
+    }
+
+    return;
+}
+
+/* 精灵动作完成后的回调函数 */
+void GameScene::onWalkDone(CCNode *pSender, void *data)
+{
+	/* 删除移动路径上的object */
+	if (iTagForOpenGate == int(data)  && iTagForOpenGate != 0)
+	{
+		openGateFrame = CCSpriteFrame::create(GameAtlasFile, CCRectMake(TileWidth * 10, TileHeight * 0, TileWidth, TileHeight));
+		CCSprite *openGateSprite = (CCSprite *)this->getChildByTag(iTagForOpenGate);
+		openGateSprite->setDisplayFrame(openGateFrame);
+		return ;
+	}
+
+	if (NULL == this->getChildByTag((int)data)) 
+    {
+        return;
+    }
+
+	removeChildByTag((int)data, true);
+
+    return;
+}
+
+/* 一次移动完成 */
+void GameScene::onMoveDone(void)
+{
+	m_bIsMovingFinished = true;
+
+	/* 判断游戏是否结束，是则进入下一关 */
+	if(isGameOver())
+	{
+		if(_stage < 9)
+		{
+			_stage++;
+			CCScene *scene = GameScene::sceneWithStage(_stage);
+			CCTransitionFade *tran = CCTransitionFade::create(1.0f, scene, ccBLACK);
+			CCDirector::sharedDirector()->replaceScene(tran);
+		}
+		else
+		{
+			CCScene *box = BoxMenu::scene();
+			CCTransitionFade *tran = CCTransitionFade::create(3.0f, box, ccBLACK);
+			CCDirector::sharedDirector()->replaceScene(tran);
+		}
+	}
+
+    return;
+}
+
+/* 真实坐标与地图坐标之间的转换，地图坐标是32*32为一个单位 */
+CCPoint GameScene::toMapPos(CCPoint pos)
+{
+    CCPoint _pos = CCPointMake((pos.x - TileWidth / 2) / TileWidth, (pos.y - TileHeight / 2) / TileHeight);
+
+    return _pos;
+}
+
+/* 地图坐标与真实坐标之间的转换 */
+CCPoint GameScene::toRealPos(CCPoint pos)
+{
+    CCPoint _pos = CCPointMake(pos.x * TileWidth+ TileWidth / 2, (m_currentMapRow - pos.y- 1) * TileHeight + TileHeight / 2);
+    
+    return _pos;
+}
+
+CCPoint GameScene::toCCPoint(Point prePos)
+{
+	CCPoint retPoint = CCPointMake((prePos.column) * TileWidth + TileWidth / 2, (m_currentMapRow - prePos.row - 1) * TileHeight + TileHeight / 2);
+
+	return retPoint;
+}
+
+/* Methods for game logic */
+bool GameScene::isGameOver()
+{
+    bool result = false;
+
+    /* 优先判定Pearls是否已经被吃完，再判断RainDrop是否已经全部死亡 */
+	if (0 == m_existedPearls)
+    {
+		/* 这里更新分数 */
+		int iScore = 0;
+		int iDiff = m_userMoveCount - m_bestMoveCount;
+		if (0 == iDiff)
+		{
+			iScore = 10;
+		}
+		else if (1 == iDiff)
+		{
+			iScore = 8;
+		}
+		else if (iDiff >= 2 && iDiff <= 5)
+		{
+			iScore = 7;
+		}
+		else if (iDiff >= 6 && iDiff <=10)
+		{
+			iScore = 6;
+		}
+		else if (iDiff >= 11 && iDiff <=30)
+		{
+			iScore = 5;
+		}
+
+		Score *scoreInstance = Score::GetInstance();
+		TEAM_S *pstTeamScore = scoreInstance->teamScore;
+		int teamTag = scoreInstance->teamTag;
+
+		cout << "-----current tag: " << teamTag << endl;
+		pstTeamScore[teamTag/1000 - 1].iScore += iScore;
+
+		char curScoreArr[20];
+		sprintf(curScoreArr, "%d", pstTeamScore[teamTag/1000 - 1].iScore);
+		cout << "-----team:" << teamTag/1000 - 1;
+		cout << "-----score:" << pstTeamScore[teamTag/1000 - 1].iScore;
+		curScoreLabel->setString(curScoreArr);
+
+		/* 播放通关音乐 */
+		SimpleAudioEngine::sharedEngine()->playEffect("../Resources/levelcomplete.mp3");
+
+        result = true;
+    }
+    else if (0 == m_existedRainDrop)
+    {
+        result = true;
+    }
+    else if (m_endlessLoop)
+    {
+        /* 雨滴进入死循环，则也应当结束游戏 */
+
+		/* 播放死掉音乐 */
+		SimpleAudioEngine::sharedEngine()->playEffect("../Resources/pairvanish.mp3");
+
+        result = true;
+    }
+
+    return result;
+}
+
+void GameScene::resetGame()
+{
+    /* 重置所有变量 */
+    m_userMoveCount = 0;
+    m_bestMoveCount = 0;
+    m_currentMapRow = 0;
+    m_currentMapColumn = 0;
+    m_totalRainPointNumber = 0;
+    m_existedRainDrop = 0;
+    m_existedPearls = 0;
+    m_endlessLoop = false;
+	m_bIsMovingFinished = true;
+
+    /* 初始化地图矩阵 */
+    for (int i = 0; i < MaxMapRow; i++)
+    {
+        for (int j = 0; j < MaxMapColumn; j++)
+        {
+            m_quellReflectMap[i][j] = CellStateMin;
+        }
+    }
+
+    /* 初始化雨滴 */
+    for (int i = 0; i < MaxRainDropNumber; i++)
+    {
+        m_rainDrops[i].point.row = 0;
+        m_rainDrops[i].point.column = 0;
+        m_rainDrops[i].state = RainDropDead;
+    }
+
+    /* 清空选手答案 */
+    m_answerList.clear();
+
+    /* 取消定时回调 */
+    CCScheduler *sharedScheduler = CCDirector::sharedDirector()->getScheduler();
+    sharedScheduler->unscheduleSelector(schedule_selector(GameScene::moveRainDropUsingAnswer), this);
+
+    return;
+}
+
+void GameScene::initQuellReflectMap(const char * filename)
+{
+    /* 首先重置游戏 */
+    resetGame();
+
+    const int BufSize = 1024;
+    int temp;
+    char buf[BufSize];
+    fstream openStream;
+    openStream.open(filename);
+    if (!openStream.is_open())
+    {
+        cout << "打开文件失败！";
+        return;
+    }
+
+    /* 读取高度 */
+    openStream.getline(buf, BufSize);
+    sscanf_s(buf, "height:%d", &m_currentMapRow);
+    
+    /* 读取宽度 */
+    openStream.getline(buf, BufSize);
+    sscanf_s(buf, "width:%d", &m_currentMapColumn);
+
+    /* 读取最少移动次数 */
+    openStream.getline(buf, BufSize);
+    sscanf_s(buf, "best:%d", &m_bestMoveCount);
+    
+    openStream.getline(buf, BufSize);
+    string regExp("%d");
+    for (int i = 0; i < m_currentMapRow; i++)
+    {
+        for (int j = 0; j < m_currentMapColumn; j++)
+        {
+            /* 通过正则表达式读取csv */
+            sscanf_s(buf, regExp.c_str(), &temp);
+            CellState state = (CellState)temp;
+            m_quellReflectMap[i][j] = state;
+            regExp.insert(0, "%*d, ");
+
+            /* 如果是雨滴，则计数 */
+            if (CellRainDrop == state)
+            {
+                Point rainPoint;
+                rainPoint.row = i;
+                rainPoint.column = j;
+                m_rainDrops[m_existedRainDrop].point = rainPoint;
+                m_rainDrops[m_existedRainDrop].state = RainDropNormal;
+                m_existedRainDrop++;
+            }
+            else if (CellNormalPearl == state || CellYellowPearl == state)
+            {
+                m_existedPearls++;
+            }
+        }
+    }
+
+    /* 记录总雨滴数 */
+    m_totalRainPointNumber = m_existedRainDrop;
+
+    /* 注意最后要关闭文件 */
+    openStream.close();
+
+    return;
+};
+
+int GameScene::getRainDropNumberFromPosition(Point point)
+{
+    int result = -1;
+    for (int i = 0; i < m_totalRainPointNumber; i++)
+    {
+        if ((m_rainDrops[i].point.row == point.row) && (m_rainDrops[i].point.column == point.column))
+        {
+            result = i;
+        }
+    }
+
+    return result;
+}
+
+void GameScene::showQuellReflectMap()
+{
+    for (int i = 0; i < m_currentMapRow; i++)
+    {
+        for (int j = 0; j < m_currentMapColumn; j++)
+        {
+            char temp;
+            Point point;
+            point.row = i;
+            point.column = j;
+            switch(m_quellReflectMap[i][j])
+            {
+            case CellNormalWall:
+                temp = 'x';
+                break;
+            case CellYellowWall:
+                temp = 'X';
+                break;
+            case CellEmpty:
+                temp = '_';
+                break;
+            case CellNormalPearl:
+                temp = 'o';
+                break;
+            case CellPoisonDrop:
+                temp = 'P';
+                break;
+            case CellRainDrop:
+                if (0 == getRainDropNumberFromPosition(point))
+                {
+                    temp = 'R';
+                }
+                else
+                {
+                    temp = 'r';
+                }
+                break;
+            case CellYellowPearl:
+                temp = 'O';
+                break;
+            case CellOpenGate:
+                temp = 'G';
+                break;
+            default:
+                break;
+            }
+            cout << temp << ' ';
+        }
+        cout << '\n';
+    }
+
+    return;
+}
+
+Point GameScene::nextPosition(Point currentPosition, MoveDirection direction)
+{
+    Point point = currentPosition;
+
+    switch(direction)
+    {
+    case MoveUp:
+        point.row --;
+        break;
+    case MoveRight:
+        point.column ++;
+        break;
+    case MoveDown:
+        point.row ++;
+        break;
+    case MoveLeft:
+        point.column --;
+        break;
+    default:
+        break;
+    }
+
+    /* 如果雨滴已经越界，说明可以穿越到另外一边 */
+    if (m_currentMapRow == point.row)
+    {
+        point.row = 0;
+    }
+    else if (-1 == point.row)
+    {
+        point.row = m_currentMapRow - 1;
+    }
+    else if (m_currentMapColumn == point.column)
+    {
+        point.column = 0;
+    }
+    else if (-1 == point.column)
+    {
+        point.column = m_currentMapColumn - 1;
+    }
+
+    return point;
+}
+
+Point GameScene::previousPosition(Point currentPosition, MoveDirection direction)
+{
+    Point point = currentPosition;
+
+    switch(direction)
+    {
+    case MoveUp:
+        point.row ++;
+        break;
+    case MoveRight:
+        point.column --;
+        break;
+    case MoveDown:
+        point.row --;
+        break;
+    case MoveLeft:
+        point.column ++;
+        break;
+    default:
+        break;
+    }
+    /* 如果雨滴已经越界，说明可以穿越到另外一边 */
+    if (m_currentMapRow == point.row)
+    {
+        point.row = 0;
+    }
+    else if (-1 == point.row)
+    {
+        point.row = m_currentMapRow - 1;
+    }
+    else if (m_currentMapColumn == point.column)
+    {
+        point.column = 0;
+    }
+    else if (-1 == point.column)
+    {
+        point.column = m_currentMapColumn - 1;
+    }
+
+    return point;
+}
+
+/* 移动雨滴， rainDropNumber代表要移动的雨滴编号(因为当前地图可能不止一个雨滴)，direction代表该雨滴的移动方向 */
+void GameScene::moveRainDrop(int rainDropNumber, MoveDirection direction)
+{
+    /* 如果当前编号的雨滴已经死亡，则不能移动 */
+    if ((rainDropNumber < 0) 
+        || (rainDropNumber >= MaxRainDropNumber) 
+        || (RainDropDead == m_rainDrops[rainDropNumber].state)
+		|| (m_bIsMovingFinished == false))
+    {
+        return;
+    }
+    
+    Point nextPos = m_rainDrops[rainDropNumber].point;
+    bool keepMoving = true;
+	m_bIsMovingFinished = false;
+
+    /* 最大移动的次数，对于左右移动次数不能超过m_currentMapColumn，否则进入死循环；
+    对于上下移动次数不能超过m_currentMapRow，否则进入死循环 */
+    int moveCount = 0;
+
+    /* 当前点不再为雨滴状态 */
+    m_quellReflectMap[nextPos.row][nextPos.column] = CellEmpty;
+
+	/* 将所有的动作保存在一个数组中 */
+	CCArray *actionArray = CCArray::create();
+    while (keepMoving)
+    {
+		/* 获得雨滴即将运动到的下一个临近位置 */
+		nextPos = nextPosition(nextPos, direction);
+		turnStateArray = NULL;
+		switch(m_quellReflectMap[nextPos.row][nextPos.column])
+		{
+		case CellNormalWall:
+			/* 碰到墙，停止前进，前一个点应该为雨滴状态 */
+			keepMoving = false;
+			nextPos = previousPosition(nextPos, direction);
+			m_rainDrops[rainDropNumber].point = nextPos;
+			m_quellReflectMap[nextPos.row][nextPos.column] = CellRainDrop;
+			direction = MoveDirectionMin;
+			break;
+		case CellYellowWall:
+			/* 碰到墙黄色的墙，如果雨滴为黄色的雨滴则可以突破，否则不可以 */
+			if (RainDropYellow == m_rainDrops[rainDropNumber].state)
+			{
+				/* 碰到黄色的墙之后应当变成普通雨滴 */
+				m_rainDrops[rainDropNumber].state = RainDropNormal;
+				/* 黄色墙壁消失 */
+				m_quellReflectMap[nextPos.row][nextPos.column] = CellEmpty;
+
+				/* 界面黄色墙壁应该消失，雨滴向前移动一步 */
+				whitePearlFrame = CCSpriteFrame::create(GameAtlasFile, CCRectMake(TileWidth * 0, TileHeight * 0, TileWidth, TileHeight));
+				turnStateArray = CCArray::create(whitePearlFrame, NULL);
+			} 
+			else
+			{
+				keepMoving = false;
+				nextPos = previousPosition(nextPos, direction);
+				m_rainDrops[rainDropNumber].point = nextPos;
+				m_quellReflectMap[nextPos.row][nextPos.column] = CellRainDrop;
+				direction = MoveDirectionMin;
+			}
+			break;
+		case CellRainDrop:
+			/* 碰到的雨滴应当判定为死亡 */
+			m_rainDrops[getRainDropNumberFromPosition(nextPos)].state = RainDropDead;
+			m_existedRainDrop -= 1;
+			m_quellReflectMap[nextPos.row][nextPos.column] = CellEmpty;
+			break;
+		case CellPoisonDrop:
+			/* 当前雨滴死亡 */
+			keepMoving = false;
+			m_existedRainDrop -= 1;
+			m_rainDrops[rainDropNumber].point = nextPos;
+			m_rainDrops[rainDropNumber].state = RainDropDead;
+			m_quellReflectMap[nextPos.row][nextPos.column] = CellEmpty;
+			break;
+		case CellNormalPearl:
+			/* 水珠数量-1，且当前点变为Empty */
+			m_existedPearls--;
+			m_quellReflectMap[nextPos.row][nextPos.column] = CellEmpty;
+
+			if (0 == m_existedPearls)
+			{
+				keepMoving = false;
+			}
+			break;
+		case CellYellowPearl:
+			/* 吃到黄色的应当将当前雨滴变成黄色的雨滴 */
+			m_existedPearls--;
+			m_rainDrops[rainDropNumber].state = RainDropYellow;
+			m_quellReflectMap[nextPos.row][nextPos.column] = CellEmpty;
+
+			if(0 == m_existedPearls)
+			{
+				keepMoving = false;
+			}
+
+            /* 应当将雨滴的图片改为黄色的雨滴 */
+			yellowPearlFrame = CCSpriteFrame::create(GameAtlasFile, CCRectMake(TileWidth * 2, TileHeight * 4, TileWidth, TileHeight));
+			turnStateArray = CCArray::create(yellowPearlFrame, NULL);
+
+			break;
+		case CellOpenGate:
+			/* 如果碰到了Gate，则当前点变为普通的墙 */
+			m_quellReflectMap[nextPos.row][nextPos.column] = CellNormalWall;
+
+			// TODO 界面注意，应当将当前点的cell显示为被使用过一次的Gate	
+			break;
+		default:
+			break;
+		}//end of switch
+
+		cout << nextPos.column << " " << nextPos.row << endl;
+
+		/* 处理翻越的情况 */
+		CCMoveTo *turnMove;
+		Point virtualPoint = nextPos;
+		if(virtualPoint.column == 0 && direction == MoveRight)
+		{
+			virtualPoint.column = -1;
+		}
+		else if(virtualPoint.column == m_currentMapColumn-1 && direction == MoveLeft)
+		{
+			virtualPoint.column = m_currentMapColumn;
+		}
+		else if(virtualPoint.row == 0 && direction == MoveDown)
+		{
+			virtualPoint.row = -1;
+			cout << "----------terrible!!" << endl;
+		}
+		else if(virtualPoint.row == m_currentMapRow - 1 && direction == MoveUp)
+		{
+			virtualPoint.row = m_currentMapRow;
+		}
+		if(virtualPoint.row != nextPos.row || virtualPoint.column != nextPos.column)
+		{
+			turnMove = CCMoveTo::create(0.0f, toCCPoint(virtualPoint));
+			actionArray->addObject(turnMove);
+		}
+
+		/* 计算object的tag值 */
+		int iTagForObj = (nextPos.column) * m_currentMapRow + nextPos.row;
+		CCMoveTo *move = CCMoveTo::create(0.14f, toCCPoint(nextPos));
+		CCCallFuncND *onWalkDoneCall =  CCCallFuncND::create(this, callfuncND_selector(GameScene::onWalkDone), (void *)iTagForObj);
+		actionArray->addObject(move);
+		actionArray->addObject(onWalkDoneCall);
+
+		/* 添加状态转变动作 */
+		if (turnStateArray)
+		{
+            CCAnimation *turnStateAnimation = CCAnimation::createWithSpriteFrames(turnStateArray, 0.01f);
+            CCAnimate *turnStateAnimate = CCAnimate::create(turnStateAnimation);
+			actionArray->addObject(turnStateAnimate);
+		}
+		/* 要判断雨滴是否进入了死循环 */
+		if (MaxMoveCount == moveCount++)
+		{
+			/* 如果进入死循环，则应当结束游戏 */
+			keepMoving = false;
+			m_endlessLoop = true;
+		}
+	}//end of while
+
+	/* 添加一次移动完毕的回调，开始执行动画数组 */
+	CCCallFunc *onMoveDoneCall = CCCallFunc::create(this, callfunc_selector(GameScene::onMoveDone));
+	actionArray->addObject(onMoveDoneCall);
+	CCAction *curAction = CCSequence::create(actionArray);
+	heroSprite->runAction(curAction);
+
+    /* 确认此次移动应该是合法的，但注意雨滴可能与墙相邻，在程序中此次移动应当也算作移动计数 */
+	m_userMoveCount += 1;
+	char curStepArr[20];
+	sprintf(curStepArr, "%d", m_userMoveCount);
+	curStepLabel->setString(curStepArr);
+
+    return;
+}
+
+int GameScene::moveCount()
+{
+    return m_userMoveCount;
+}
+
+void GameScene::loadAnswerToRun(CCObject *pSender)
+{
+    /* 清空后载入选手答案 */
+    m_answerList.clear();
+
+	arrowMenu->retain();
+	removeChild(arrowMenu, false);
+
+    HANDLE hThread;
+    unsigned threadID;
+    DWORD dwFlag = 0;
+
+    // 创建第二个线程,第一个线程是主线程!
+    hThread = (HANDLE)_beginthreadex(NULL, 0, &solutionThread, NULL, 0, &threadID);
+
+    // 限制新线程运行时间，这里设定为5秒
+	DWORD   dwExitCode;
+    dwFlag = WaitForSingleObject(hThread, 5000);
+	//GetExitCodeThread(hThread, &dwExitCode);
+	TerminateThread(hThread, dwExitCode);
+	CloseHandle(hThread);
+
+	while ((int)m_answerList.size() > (m_bestMoveCount + 30))
+	{
+		m_answerList.pop_back();
+	}
+
+    /* 定时回调选手的答案 */
+    CCScheduler *sharedScheduler = CCDirector::sharedDirector()->getScheduler();
+    sharedScheduler->unscheduleSelector(schedule_selector(GameScene::moveRainDropUsingAnswer), this);
+    sharedScheduler->scheduleSelector(schedule_selector(GameScene::moveRainDropUsingAnswer), this, 1.5f, false);
+
+    return;
+}
+
+void GameScene::moveRainDropUsingAnswer(float ct)
+{
+    if (m_answerList.empty())
+    {
+        CCScheduler *sharedScheduler = CCDirector::sharedDirector()->getScheduler();
+        sharedScheduler->unscheduleSelector(schedule_selector(GameScene::moveRainDropUsingAnswer), this);
+
+		if(arrowMenu != NULL)
+		{
+			addChild(arrowMenu);
+		}
+    }
+    else
+    {
+        /* 获取第一个元素，获得后清除该第一个元素 */
+        MoveDirection direction = m_answerList.front();
+        m_answerList.pop_front();
+
+        if (MoveDirectionMin < direction && direction < MoveDirectionMax)
+        {
+            moveRainDrop(0, direction);
+        }
+    }
+
+    return;
+}

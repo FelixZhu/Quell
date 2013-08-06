@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.0" orientation="orthogonal" width="7" height="8" tilewidth="32" tileheight="32">
+ <tileset firstgid="1" name="game_atlas_Q2" tilewidth="32" tileheight="32">
+  <image source="game_atlas_Q2.png" width="512" height="512"/>
+ </tileset>
+ <layer name="background" width="7" height="8">
+  <data encoding="base64" compression="zlib">
+   eJxzY2BgcCOA/YhQQ02MDCg1CwCdqg6H
+  </data>
+ </layer>
+ <objectgroup name="object" width="7" height="8">
+  <object name="CellYellowWall3" x="192" y="64" width="32" height="32"/>
+  <object name="CellYellowWall4" x="192" y="96" width="32" height="32"/>
+  <object name="CellYellowWall5" x="192" y="128" width="32" height="32"/>
+  <object name="CellYellowWall10" x="192" y="224" width="32" height="32"/>
+  <object name="CellYellowWall8" x="96" y="192" width="32" height="32"/>
+  <object name="CellYellowWall9" x="128" y="192" width="32" height="32"/>
+  <object name="CellYellowWall7" x="0" y="192" width="32" height="32"/>
+  <object name="CellYellowWall6" x="32" y="160" width="32" height="32"/>
+  <object name="CellYellowWall1" x="0" y="32" width="32" height="32"/>
+  <object name="CellYellowWall0" x="64" y="0" width="32" height="32"/>
+  <object name="CellYellowWall2" x="160" y="32" width="32" height="32"/>
+  <object name="CellNormalPearl0" x="96" y="0" width="32" height="32"/>
+  <object name="CellYellowPearl0" x="96" y="64" width="32" height="32"/>
+  <object name="CellRainDrop0" x="96" y="96" width="32" height="32"/>
+  <object name="CellNormalPearl1" x="0" y="96" width="32" height="32"/>
+  <object name="CellYellowPearl1" x="64" y="192" width="32" height="32"/>
+ </objectgroup>
+</map>

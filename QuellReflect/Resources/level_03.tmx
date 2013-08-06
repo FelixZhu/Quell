@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.0" orientation="orthogonal" width="7" height="7" tilewidth="32" tileheight="32">
+ <tileset firstgid="1" name="game_atlas_Q2" tilewidth="32" tileheight="32">
+  <image source="game_atlas_Q2.png" width="512" height="512"/>
+ </tileset>
+ <layer name="background" width="7" height="7">
+  <data encoding="base64" compression="zlib">
+   eJxzY2BgcMOCA5FoPyQ+PuxChBp087FhZEBIL4gNADYjDN0=
+  </data>
+ </layer>
+ <objectgroup name="object" width="7" height="7">
+  <object name="CellRainDrop0" x="96" y="128" width="32" height="32"/>
+  <object name="CellNormalPearl0" x="128" y="96" width="32" height="32"/>
+  <object name="CellNormalPearl1" x="96" y="160" width="32" height="32"/>
+  <object name="CellNormalPearl2" x="192" y="160" width="32" height="32"/>
+ </objectgroup>
+</map>
